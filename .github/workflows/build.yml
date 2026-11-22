@@ -1,0 +1,41 @@
+name: Build KINO APK
+on:
+  push:
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Find and unzip the project
+        run: |
+          Z=$(find . -maxdepth 3 -iname '*.zip' -not -path './.git/*' | head -1)
+          if [ -z "$Z" ]; then echo "No zip file found in the repo. Files:"; ls -R | head -50; exit 1; fi
+          echo "Using zip: $Z"
+          unzip -q "$Z" -d unz
+          PJ=$(find unz -name package.json -not -path '*/node_modules/*' | head -1)
+          if [ -z "$PJ" ]; then echo "package.json not found inside the zip"; exit 1; fi
+          mv "$(dirname "$PJ")" app
+      - uses: actions/setup-node@v4
+        with: { node-version: 20 }
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+      - run: npm install
+        working-directory: app
+      - run: npx cap add android
+        working-directory: app
+      - name: Add gallery-save plugin
+        run: |
+          D=app/android/app/src/main/java/com/kino/aieditor
+          mkdir -p "$D"
+          cp app/android-extra/*.java "$D/"
+          M=app/android/app/src/main/AndroidManifest.xml
+          grep -q WRITE_EXTERNAL_STORAGE "$M" || sed -i 's#<application#<uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />\n    <application#' "$M"
+      - run: npx cap sync android
+        working-directory: app
+      - run: chmod +x gradlew && ./gradlew assembleDebug
+        working-directory: app/android
+      - uses: actions/upload-artifact@v4
+        with:
+          name: kino-debug-apk
+          path: app/android/app/build/outputs/apk/debug/*.apk
